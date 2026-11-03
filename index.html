@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#080b18">
+<title>NEON RELAY — A Signal Runner</title>
+<style>
+:root{--bg:#080b18;--panel:#11182c;--cyan:#57f6e7;--pink:#ff4da6;--gold:#ffd166;--muted:#9aa8c7}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 50% 0%,#182448 0%,#080b18 60%);color:#eef4ff;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Arial,sans-serif;display:flex;justify-content:center;align-items:center;padding:20px}
+.wrap{width:min(940px,100%)}header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}.brand{font-weight:900;letter-spacing:.18em;font-size:clamp(20px,4vw,30px)}.brand span{color:var(--cyan)}.tag{font-size:11px;color:var(--muted);letter-spacing:.16em}
+.game-shell{background:linear-gradient(145deg,#151d36,#0c1225);border:1px solid #29365b;border-radius:22px;padding:clamp(12px,3vw,22px);box-shadow:0 25px 80px #0008}
+.hud{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:12px}.stat{background:#090f20;border:1px solid #263252;border-radius:12px;padding:9px 12px}.stat small{display:block;color:var(--muted);font-size:10px;letter-spacing:.14em}.stat strong{font-size:20px;color:#fff}
+.stage{position:relative;border-radius:15px;overflow:hidden;background:#070b17;border:1px solid #263252}.stage canvas{display:block;width:100%;height:auto;touch-action:none}
+.overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#070b17d9;padding:18px;text-align:center}.overlay.hidden{display:none}.modal{max-width:440px}.modal h1{font-size:clamp(28px,6vw,48px);margin:0 0 8px;letter-spacing:.08em}.modal h1 span{color:var(--cyan)}.modal p{color:#b9c6e4;line-height:1.6;margin:8px 0 18px}.btn{border:0;border-radius:999px;padding:12px 22px;background:var(--cyan);color:#06121a;font-weight:900;letter-spacing:.08em;cursor:pointer;box-shadow:0 0 25px #57f6e755}.btn:hover{transform:translateY(-1px);filter:brightness(1.08)}.btn.secondary{background:#273452;color:#eaf1ff;box-shadow:none}
+.controls{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:13px;flex-wrap:wrap}.hint{color:var(--muted);font-size:12px;line-height:1.5}.actions{display:flex;gap:8px}.mobile-pad{display:none;grid-template-columns:repeat(3,42px);grid-template-rows:repeat(2,38px);gap:5px}.mobile-pad button{border:1px solid #334366;background:#17213a;color:#dff;border-radius:9px;font-size:17px}
+footer{text-align:center;color:#647394;font-size:11px;margin-top:12px;letter-spacing:.08em}
+@media(max-width:600px){body{padding:10px}.hud{gap:5px}.stat{padding:7px}.stat strong{font-size:17px}.stat small{font-size:9px}.mobile-pad{display:grid}.hint{max-width:190px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header><div class="brand">NEON <span>RELAY</span></div><div class="tag">SIGNAL RUNNER // 2089</div></header>
+<div class="game-shell">
+<div class="hud">
+ <div class="stat"><small> SCORE</small><strong id="score">0000</strong></div>
+ <div class="stat"><small> DATA CELLS</small><strong id="cells">0 / 5</strong></div>
+ <div class="stat"><small> SECTOR</small><strong id="level">01</strong></div>
+ <div class="stat"><small> SHIELDS</small><strong id="lives">♥ ♥ ♥</strong></div>
+</div>
+<div class="stage">
+ <canvas id="game" width="800" height="520" aria-label="Neon Relay game board"></canvas>
+ <div class="overlay" id="overlay"><div class="modal">
+  <div class="tag">A ONE-PERSON ARCADE CHALLENGE</div><h1>NEON <span>RELAY</span></h1>
+  <p>You're the last courier in the grid. Collect 5 data cells, dodge the rogue sentries, and reach the glowing relay gate. Every sector gets faster.</p>
+  <button class="btn" id="start">START RUN</button>
+  <p style="font-size:11px;margin-top:14px">MOVE: WASD / ARROW KEYS · PAUSE: P · MOBILE: D-PAD</p>
+ </div></div>
+</div>
+<div class="controls">
+ <div class="hint">⚡ Grab <b style="color:#57f6e7">cyan cells</b> · Avoid <b style="color:#ff4da6">pink sentries</b> · Find the <b style="color:#ffd166">gold relay</b></div>
+ <div class="mobile-pad" aria-label="Touch controls">
+  <span></span><button data-dir="up">▲</button><span></span>
+  <button data-dir="left">◀</button><button data-dir="down">▼</button><button data-dir="right">▶</button>
+ </div>
+ <div class="actions"><button class="btn secondary" id="pause">PAUSE</button><button class="btn secondary" id="restart">RESTART</button></div>
+</div>
+</div>
+<footer>BUILT FOR THE CURIOUS · NO DOWNLOADS · PLAY IN YOUR BROWSER</footer>
+</div>
+<script>
+(()=>{
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id);
+const W=800,H=520,cell=40,cols=20,rows=13;
+let player,items,enemies,score,level,lives,got,playing,paused,frame,last=0,moveClock=0,gate,particles;
+const keys={};
+const dirs={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
+function rand(n){return Math.floor(Math.random()*n)}
+function pos(){return {x:1+rand(cols-2),y:1+rand(rows-2)}}
+function same(a,b){return a.x===b.x&&a.y===b.y}
+function free(p,arr){return !arr.some(o=>same(p,o))&&!(p.x===player.x&&p.y===player.y)}
+function resetSector(){
+ player={x:1,y:Math.floor(rows/2),inv:0};got=0;items=[];enemies=[];particles=[];
+ gate={x:cols-2,y:Math.floor(rows/2)};
+ while(items.length<5){let p=pos();if(free(p,items)&&!same(p,gate))items.push(p)}
+ let count=Math.min(2+level,7);
+ for(let i=0;i<count;i++){let p=pos();if(free(p,enemies)&&!same(p,gate))enemies.push({...p,dx:Math.random()<.5?1:-1,dy:0,step:0})}
+ updateHUD();
+}
+function newGame(){score=0;level=1;lives=3;playing=true;paused=false;resetSector();$('overlay').classList.add('hidden');$('pause').textContent='PAUSE';draw()}
+function updateHUD(){$('score').textContent=String(score).padStart(4,'0');$('cells').textContent=`${got} / 5`;$('level').textContent=String(level).padStart(2,'0');$('lives').textContent='♥ '.repeat(lives).trim()||'—'}
+function burst(x,y,color){for(let i=0;i<10;i++)particles.push({x:x*cell+20,y:y*cell+20,vx:(Math.random()-.5)*4,vy:(Math.random()-.5)*4,life:25,color})}
+function movePlayer(dx,dy){
+ if(!playing||paused)return;
+ let nx=Math.max(0,Math.min(cols-1,player.x+dx)),ny=Math.max(0,Math.min(rows-1,player.y+dy));
+ if(nx===player.x&&ny===player.y)return;
+ player.x=nx;player.y=ny;
+ let idx=items.findIndex(o=>same(o,player));
+ if(idx>=0){items.splice(idx,1);got++;score+=100;burst(nx,ny,'#57f6e7');updateHUD()}
+ if(same(player,gate)&&got===5){score+=250*level;level++;resetSector();return}
+ checkHit();draw();
+}
+function checkHit(){if(player.inv>0)return;let e=enemies.find(o=>same(o,player));if(e){lives--;player.inv=24;burst(player.x,player.y,'#ff4da6');updateHUD();if(lives<=0)endGame()}}
+function endGame(){playing=false;$('overlay').classList.remove('hidden');$('overlay').innerHTML=`<div class="modal"><div class="tag">SIGNAL LOST</div><h1>RUN <span>ENDED</span></h1><p>You reached sector <b>${String(level).padStart(2,'0')}</b> and scored <b>${score}</b> points.</p><button class="btn" id="start">TRY AGAIN</button></div>`;$('start').onclick=newGame}
+function togglePause(){if(!playing)return;paused=!paused;$('pause').textContent=paused?'RESUME':'PAUSE';if(paused){$('overlay').classList.remove('hidden');$('overlay').innerHTML='<div class="modal"><h1>PAUSED</h1><p>Catch your breath, courier.</p><button class="btn" id="resume">RESUME RUN</button></div>';$('resume').onclick=togglePause}else $('overlay').classList.add('hidden');draw()}
+function enemyStep(){
+ for(const e of enemies){e.step++;if(e.step<(Math.max(3,9-level)))continue;e.step=0;
+  let dx=player.x-e.x,dy=player.y-e.y;
+  if(Math.random()<.72){if(Math.abs(dx)>Math.abs(dy))e.x+=Math.sign(dx);else e.y+=Math.sign(dy)}
+  else {if(Math.random()<.5)e.x+=Math.random()<.5?1:-1;else e.y+=Math.random()<.5?1:-1}
+  e.x=Math.max(1,Math.min(cols-2,e.x));e.y=Math.max(1,Math.min(rows-2,e.y));
+ }
+ checkHit();
+}
+function draw(){
+ ctx.clearRect(0,0,W,H);ctx.fillStyle='#080d1b';ctx.fillRect(0,0,W,H);
+ for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){ctx.strokeStyle=(x%5===0||y%4===0)?'#1d2b49':'#111c34';ctx.lineWidth=1;ctx.strokeRect(x*cell+.5,y*cell+.5,cell,cell)}
+ // subtle side rails
+ ctx.fillStyle='#101a31';ctx.fillRect(0,0,cell,H);ctx.fillRect((cols-1)*cell,0,cell,H);ctx.fillRect(0,0,W,cell);ctx.fillRect(0,(rows-1)*cell,W,cell);
+ // relay gate
+ ctx.save();ctx.shadowBlur=22;ctx.shadowColor='#ffd166';ctx.strokeStyle='#ffd166';ctx.lineWidth=3;ctx.strokeRect(gate.x*cell+8,gate.y*cell+8,24,24);ctx.fillStyle='#ffd166';ctx.fillRect(gate.x*cell+15,gate.y*cell+15,10,10);ctx.restore();
+ for(const p of items){ctx.save();ctx.translate(p.x*cell+20,p.y*cell+20);ctx.rotate(Math.PI/4);ctx.shadowBlur=15;ctx.shadowColor='#57f6e7';ctx.fillStyle='#57f6e7';ctx.fillRect(-7,-7,14,14);ctx.restore()}
+ for(const e of enemies){ctx.save();ctx.shadowBlur=17;ctx.shadowColor='#ff4da6';ctx.fillStyle='#ff4da6';ctx.beginPath();ctx.arc(e.x*cell+20,e.y*cell+20,12,0,Math.PI*2);ctx.fill();ctx.fillStyle='#230b23';ctx.fillRect(e.x*cell+14,e.y*cell+17,4,4);ctx.fillRect(e.x*cell+22,e.y*cell+17,4,4);ctx.restore()}
+ if(player){ctx.save();ctx.globalAlpha=player.inv>0&&Math.floor(frame/3)%2===0?.35:1;ctx.shadowBlur=22;ctx.shadowColor='#57f6e7';ctx.fillStyle='#dffffb';ctx.beginPath();ctx.moveTo(player.x*cell+20,player.y*cell+7);ctx.lineTo(player.x*cell+32,player.y*cell+31);ctx.lineTo(player.x*cell+20,player.y*cell+26);ctx.lineTo(player.x*cell+8,player.y*cell+31);ctx.closePath();ctx.fill();ctx.restore()}
+ for(const p of particles){ctx.globalAlpha=p.life/25;ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,3,3);ctx.globalAlpha=1}
+ if(got<5){ctx.fillStyle='#8291b5';ctx.font='12px monospace';ctx.fillText('RELAY LOCKED // COLLECT ALL DATA CELLS',16, H-12)}else{ctx.fillStyle='#ffd166';ctx.font='bold 12px monospace';ctx.fillText('RELAY UNLOCKED // ENTER THE GOLD GATE',16,H-12)}
+}
+function loop(t){requestAnimationFrame(loop);if(!playing||paused)return;let dt=t-last;last=t;frame++;if(player.inv>0)player.inv--;moveClock+=dt;if(moveClock>135){moveClock=0;enemyStep();for(let p of particles){p.x+=p.vx;p.y+=p.vy;p.life--}particles=particles.filter(p=>p.life>0);draw()}}
+function input(k){let d=dirs[k];if(d)movePlayer(...d)}
+window.addEventListener('keydown',e=>{let k=e.key.toLowerCase();if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k))e.preventDefault();if(k==='p'||k==='escape'){togglePause();return}if(k==='w'||k==='arrowup')input('up');if(k==='s'||k==='arrowdown')input('down');if(k==='a'||k==='arrowleft')input('left');if(k==='d'||k==='arrowright')input('right')});
+document.querySelectorAll('[data-dir]').forEach(b=>{b.addEventListener('click',()=>input(b.dataset.dir));b.addEventListener('touchstart',e=>{e.preventDefault();input(b.dataset.dir)},{passive:false})});
+$('start').onclick=newGame;$('pause').onclick=togglePause;$('restart').onclick=newGame;
+resetSector();playing=false;draw();requestAnimationFrame(loop);
+})();
+</script>
+</body></html>
